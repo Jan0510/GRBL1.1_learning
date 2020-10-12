@@ -1,0 +1,7 @@
+-c --cpu Cortex-M4.fp -g -O0 --apcs=interwork -I..\CORE -I..\SYSTEM\delay -I..\SYSTEM\sys -I..\SYSTEM\usart -I..\USER -I..\FWLIB\inc -I..\GRBL -I..\HARDWARE
+-I "I:\Keil_v5\STM32 Projects\2016050401\USER\RTE"
+-I i:\Keil_v5\ARM\PACK\Keil\STM32F4xx_DFP\2.7.0
+-I i:\Keil_v5\ARM\CMSIS\Include
+-I i:\Keil_v5\ARM\PACK\Keil\STM32F4xx_DFP\2.7.0\Device\Include
+-D__UVISION_VERSION="514" -DSTM32F407xx -DSTM32F40_41xxx -DUSE_STDPERIPH_DRIVER
+-o ..\obj\coolant.o --omf_browse ..\obj\coolant.crf --depend ..\obj\coolant.d "..\GRBL\coolant.c"
