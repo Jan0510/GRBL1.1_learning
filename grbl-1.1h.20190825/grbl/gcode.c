@@ -342,7 +342,7 @@ uint8_t gc_execute_line(char *line)
     }
   }
   // Parsing complete!
-  // 整个line中的GCode解释完成
+  // 整个line[]中的GCode解释完成
 
   /* -------------------------------------------------------------------------------------
      STEP 3: Error-check all commands and values passed in this block. This step ensures all of

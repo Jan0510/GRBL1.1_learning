@@ -112,8 +112,8 @@ void protocol_main_loop()
         line_flags = 0;
         char_counter = 0;
 
-      } else {
-
+      }
+	  else {
         if (line_flags) {
           // Throw away all (except EOL) comment characters and overflow characters.
           if (c == ')') {
