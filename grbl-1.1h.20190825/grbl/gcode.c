@@ -403,7 +403,8 @@ uint8_t gc_execute_line(char *line)
   if (gc_parser_flags & GC_PARSER_JOG_MOTION) {
     if (bit_isfalse(value_words,bit(WORD_F))) { FAIL(STATUS_GCODE_UNDEFINED_FEED_RATE); }
     if (gc_block.modal.units == UNITS_MODE_INCHES) { gc_block.values.f *= MM_PER_INCH; }
-  } else {
+  } 
+  else {
     if (gc_block.modal.feed_rate == FEED_RATE_MODE_INVERSE_TIME) { // = G93
       // NOTE: G38 can also operate in inverse time, but is undefined as an error. Missing F word check added here.
       if (axis_command == AXIS_COMMAND_MOTION_MODE) {
@@ -880,6 +881,7 @@ uint8_t gc_execute_line(char *line)
   plan_line_data_t *pl_data = &plan_data;
   memset(pl_data,0,sizeof(plan_line_data_t)); // Zero pl_data struct
 
+  // 点动命令优先，其他GCode会在点动命令执行完后再执行。
   // Intercept jog commands and complete error checking for valid jog commands and execute.
   // NOTE: G-code parser state is not updated, except the position to ensure sequential jog
   // targets are computed correctly. The final parser position after a jog is updated in
@@ -891,7 +893,7 @@ uint8_t gc_execute_line(char *line)
     if (!(gc_block.non_modal_command == NON_MODAL_ABSOLUTE_OVERRIDE || gc_block.non_modal_command == NON_MODAL_NO_ACTION)) { FAIL(STATUS_INVALID_JOG_COMMAND); }
 
     // Initialize planner data to current spindle and coolant modal state.
-    // GCode持续到本次
+    // GCode状态继承下来
     pl_data->spindle_speed = gc_state.spindle_speed;
     plan_data.condition = (gc_state.modal.spindle | gc_state.modal.coolant);
 
@@ -932,7 +934,8 @@ uint8_t gc_execute_line(char *line)
   }
 
   // [0. Non-specific/common error-checks and miscellaneous setup]:
-  // NOTE: If no line number is present, the value is zero.用于日志记录。
+  // NOTE: If no line number is present, the value is zero.
+  // 用于日志记录。
   gc_state.line_number = gc_block.values.n;
   #ifdef USE_LINE_NUMBERS
     pl_data->line_number = gc_state.line_number; // Record data for planner use.
@@ -940,7 +943,7 @@ uint8_t gc_execute_line(char *line)
 
   // [1. Comments feedback ]:  NOT SUPPORTED
 
-  // [2. Set feed rate mode ]:进给速度的表达方式，G93或G94
+  // [2. Set feed rate mode ]:进给速度的表达方式，G93（默认）或G94（逆时限）
   gc_state.modal.feed_rate = gc_block.modal.feed_rate;
   if (gc_state.modal.feed_rate) { pl_data->condition |= PL_COND_FLAG_INVERSE_TIME; } // Set condition flag for planner use.
 
@@ -948,13 +951,14 @@ uint8_t gc_execute_line(char *line)
   gc_state.feed_rate = gc_block.values.f; // Always copy this value. See feed rate error-checking.
   pl_data->feed_rate = gc_state.feed_rate; // Record data for planner use.
 
-  // [4. Set spindle speed ]:主轴速度
+  // [4. Set spindle speed ]:主轴速度，激光位于主轴上
+  // 若主轴速度有变或者激光可以被强制同步，则更新主轴速度
   if ((gc_state.spindle_speed != gc_block.values.s) || bit_istrue(gc_parser_flags,GC_PARSER_LASER_FORCE_SYNC)) {
     if (gc_state.modal.spindle != SPINDLE_DISABLE) { 
-      #ifdef VARIABLE_SPINDLE
-        if (bit_isfalse(gc_parser_flags,GC_PARSER_LASER_ISMOTION)) {
-          if (bit_istrue(gc_parser_flags,GC_PARSER_LASER_DISABLE)) {
-             spindle_sync(gc_state.modal.spindle, 0.0);
+      #ifdef VARIABLE_SPINDLE // 如果主轴电压可变
+        if (bit_isfalse(gc_parser_flags,GC_PARSER_LASER_ISMOTION)) { // 激光即将没有动作
+          if (bit_istrue(gc_parser_flags,GC_PARSER_LASER_DISABLE)) { // 激光即将被禁能
+             spindle_sync(gc_state.modal.spindle, 0.0); // 激光即将被禁能，所以主轴停止
           } else { spindle_sync(gc_state.modal.spindle, gc_block.values.s); }
         }
       #else
@@ -964,7 +968,7 @@ uint8_t gc_execute_line(char *line)
     gc_state.spindle_speed = gc_block.values.s; // Update spindle speed state.
   }
   // NOTE: Pass zero spindle speed for all restricted laser motions.
-  if (bit_isfalse(gc_parser_flags,GC_PARSER_LASER_DISABLE)) {
+  if (bit_isfalse(gc_parser_flags,GC_PARSER_LASER_DISABLE)) { // 如果没有激光禁能的指令
     pl_data->spindle_speed = gc_state.spindle_speed; // Record data for planner use. 
   } // else { pl_data->spindle_speed = 0.0; } // Initialized as zero already.
   
