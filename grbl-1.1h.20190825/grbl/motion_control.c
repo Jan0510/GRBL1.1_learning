@@ -22,17 +22,12 @@
 #include "grbl.h"
 
 
-// Execute linear motion in absolute millimeter coordinates. Feed rate given in millimeters/second
-// unless invert_feed_rate is true. Then the feed_rate means that the motion should be completed in
-// (1 minute)/feed_rate time.
-// NOTE: This is the primary gateway to the grbl planner. All line motions, including arc line
-// segments, must pass through this routine before being passed to the planner. The seperation of
-// mc_line and plan_buffer_line is done primarily to place non-planner-type functions from being
-// in the planner and to let backlash compensation or canned cycle integration simple and direct.
+// 执行线性运动到绝对坐标点. 进给速度为mm/s，若是逆时序进给，则进给率应该为 (1 minute)/feed_rate time.
+// 直线进给和圆弧进给都要调用mc_line()把数据传给planner
+
 void mc_line(float *target, plan_line_data_t *pl_data)
 {
-  // If enabled, check for soft limit violations. Placed here all line motions are picked up
-  // from everywhere in Grbl.
+  // 软限位
   if (bit_istrue(settings.flags,BITFLAG_SOFT_LIMIT_ENABLE)) {
     // NOTE: Block jog state. Jogging is a special case and soft limits are handled independently.
     if (sys.state != STATE_JOG) { limits_soft_check(target); }
@@ -351,6 +346,7 @@ uint8_t mc_probe_cycle(float *target, plan_line_data_t *pl_data, uint8_t parser_
   void mc_override_ctrl_update(uint8_t override_state)
   {
     // Finish all queued commands before altering override control state
+    // 把旧的执行命令全部执行完后，再切换成override control
     protocol_buffer_synchronize();
     if (sys.abort) { return; }
     sys.override_ctrl = override_state;

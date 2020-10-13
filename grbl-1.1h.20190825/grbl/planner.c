@@ -312,6 +312,7 @@ void plan_update_velocity_profile_parameters()
    head. It avoids changing the planner state and preserves the buffer to ensure subsequent gcode
    motions are still planned correctly, while the stepper module only points to the block buffer head
    to execute the special system motion. */
+// 向block_buffer添加新的线性运动block
 uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
 {
   // Prepare and initialize new block. Copy relevant pl_data for block execution.
@@ -339,8 +340,7 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
     #else
       memcpy(position_steps, sys_position, sizeof(sys_position)); 
     #endif
-  } else { memcpy(position_steps, pl.position, sizeof(pl.position)); }
-
+  } else { memcpy(position_steps, pl.position, sizeof(pl.position)); } // sys_position与pl.position的区别是什么？
   #ifdef COREXY
     target_steps[A_MOTOR] = lround(target[A_MOTOR]*settings.steps_per_mm[A_MOTOR]);
     target_steps[B_MOTOR] = lround(target[B_MOTOR]*settings.steps_per_mm[B_MOTOR]);
@@ -366,14 +366,15 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
         delta_mm = (target_steps[idx] - position_steps[idx])/settings.steps_per_mm[idx];
       }
     #else
-      target_steps[idx] = lround(target[idx]*settings.steps_per_mm[idx]);
+	
+      target_steps[idx] = lround(target[idx]*settings.steps_per_mm[idx]); // 从绝对坐标地址转换到steps
       block->steps[idx] = labs(target_steps[idx]-position_steps[idx]);
-      block->step_event_count = max(block->step_event_count, block->steps[idx]);
-      delta_mm = (target_steps[idx] - position_steps[idx])/settings.steps_per_mm[idx];
+      block->step_event_count = max(block->step_event_count, block->steps[idx]); // 记录最长轴的步数
+      delta_mm = (target_steps[idx] - position_steps[idx])/settings.steps_per_mm[idx]; // 记录该轴上的位移
 	  #endif
     unit_vec[idx] = delta_mm; // Store unit vector numerator
 
-    // Set direction bits. Bit enabled always means direction is negative.
+    // 设置位移的方向
     if (delta_mm < 0.0 ) { block->direction_bits |= get_direction_pin_mask(idx); }
   }
 
@@ -384,11 +385,12 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
   // down such that no individual axes maximum values are exceeded with respect to the line direction.
   // NOTE: This calculation assumes all axes are orthogonal (Cartesian) and works with ABC-axes,
   // if they are also orthogonal/independent. Operates on the absolute value of the unit vector.
+  // 计算该block存放的距离、加速度、转速r/m
   block->millimeters = convert_delta_vector_to_unit_vector(unit_vec);
   block->acceleration = limit_value_by_axis_maximum(settings.acceleration, unit_vec);
   block->rapid_rate = limit_value_by_axis_maximum(settings.max_rate, unit_vec);
 
-  // Store programmed rate.
+  // 存放进给速度，根据标志位区分转速r/m或线速mm/m
   if (block->condition & PL_COND_FLAG_RAPID_MOTION) { block->programmed_rate = block->rapid_rate; }
   else { 
     block->programmed_rate = pl_data->feed_rate;
@@ -396,6 +398,7 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
   }
 
   // TODO: Need to check this method handling zero junction speeds when starting from rest.
+  // 从静止开始时，需要检查此方法来处理零接合速度
   if ((block_buffer_head == block_buffer_tail) || (block->condition & PL_COND_FLAG_SYSTEM_MOTION)) {
 
     // Initialize block entry speed as zero. Assume it will be starting from rest. Planner will correct this later.
@@ -425,7 +428,7 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
     // changed dynamically during operation nor can the line move geometry. This must be kept in
     // memory in the event of a feedrate override changing the nominal speeds of blocks, which can
     // change the overall maximum entry speed conditions of all blocks.
-
+	// 通过向心加速度逼近计算交点处的最大允许入口速度。
     float junction_unit_vec[N_AXIS];
     float junction_cos_theta = 0.0;
     for (idx=0; idx<N_AXIS; idx++) {

@@ -982,9 +982,12 @@ uint8_t gc_execute_line(char *line)
     // Update spindle control and apply spindle speed when enabling it in this block.
     // NOTE: All spindle state changes are synced, even in laser mode. Also, pl_data,
     // rather than gc_state, is used to manage laser state for non-laser motions.
+    // 将需要设置的主轴状态、主轴速度传入，推入执行队列
     spindle_sync(gc_block.modal.spindle, pl_data->spindle_speed);
+	// 更新
     gc_state.modal.spindle = gc_block.modal.spindle;
   }
+  // 更新condition，在planer里被使用
   pl_data->condition |= gc_state.modal.spindle; // Set condition flag for planner use.
 
   // [8. Coolant control ]:冷却液控制
@@ -1004,7 +1007,7 @@ uint8_t gc_execute_line(char *line)
     }
   #endif
 
-  // [10. Dwell ]:停驻
+  // [10. Dwell ]:停驻，属于非模态指令，直接调用停车指令控制运动停止p秒
   if (gc_block.non_modal_command == NON_MODAL_DWELL) { mc_dwell(gc_block.values.p); }
 
   // [11. Set active plane ]:

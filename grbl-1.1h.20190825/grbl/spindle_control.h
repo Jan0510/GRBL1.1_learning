@@ -39,8 +39,8 @@ uint8_t spindle_get_state();
 // Called by g-code parser when setting spindle state and requires a buffer sync.
 // Immediately sets spindle running state with direction and spindle rpm via PWM, if enabled.
 // Called by spindle_sync() after sync and parking motion/spindle stop override during restore.
+// 主轴转速可变
 #ifdef VARIABLE_SPINDLE
-
   // Called by g-code parser when setting spindle state and requires a buffer sync.
   void spindle_sync(uint8_t state, float rpm);
 
@@ -55,7 +55,8 @@ uint8_t spindle_get_state();
   uint8_t spindle_compute_pwm_value(float rpm);
   
 #else
-  
+  // 主轴转速不可变
+
   // Called by g-code parser when setting spindle state and requires a buffer sync.
   #define spindle_sync(state, rpm) _spindle_sync(state)
   void _spindle_sync(uint8_t state);

@@ -52,11 +52,12 @@
 
 // This struct stores a linear movement of a g-code block motion with its critical "nominal" values
 // are as specified in the source g-code.
+// 该结构体存放了GCode解析出来的直线运动数据，包括了加速-恒速-减速阶段
 typedef struct {
   // Fields used by the bresenham algorithm for tracing the line
   // NOTE: Used by stepper algorithm to execute the block correctly. Do not alter these values.
-  uint32_t steps[N_AXIS];    // Step count along each axis
-  uint32_t step_event_count; // The maximum step axis count and number of steps required to complete this block.
+  uint32_t steps[N_AXIS];    // 每个轴需要走的步数
+  uint32_t step_event_count; // 最长轴需要走的步数.
   uint8_t direction_bits;    // The direction bit set for this block (refers to *_DIRECTION_BIT in config.h)
 
   // Block condition data to ensure correct execution depending on states and overrides.
@@ -87,6 +88,7 @@ typedef struct {
 
 
 // Planner data prototype. Must be used when passing new motions to the planner.
+// plan_line_data_t与plan_block_t一同传给mc_line()或mc_arc()，携带了数据
 typedef struct {
   float feed_rate;          // Desired feed rate for line motion. Value is ignored, if rapid motion.
   float spindle_speed;      // Desired spindle speed through line motion.

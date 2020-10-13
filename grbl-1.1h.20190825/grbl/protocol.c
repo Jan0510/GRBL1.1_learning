@@ -170,9 +170,13 @@ void protocol_main_loop()
 
 // Block until all buffered steps are executed or in a cycle state. Works with feed hold
 // during a synchronize call, if it should happen. Also, waits for clean cycle end.
+// 阻塞执行，直到所有缓冲步骤被执行完，或者进入循环状态。
+// 一般会在新的命令之前调用它，确保旧的命令被执行完。
 void protocol_buffer_synchronize()
 {
   // If system is queued, ensure cycle resumes if the auto start flag is present.
+  // 如果系统已经排好执行队列。打开循环标志，确保循环可以重新开始。
+  // 自动循环的触发条件：动作命令已经准备就绪，有循环标志，没有后续新增的命令。
   protocol_auto_cycle_start();
   do {
     protocol_execute_realtime();   // Check and execute run-time commands
@@ -187,6 +191,7 @@ void protocol_buffer_synchronize()
 // when one of these conditions exist respectively: There are no more blocks sent (i.e. streaming
 // is finished, single commands), a command that needs to wait for the motions in the buffer to
 // execute calls a buffer sync, or the planner buffer is full and ready to go.
+// 
 void protocol_auto_cycle_start()
 {
   if (plan_get_current_block() != NULL) { // Check if there are any blocks in the buffer.
@@ -204,8 +209,15 @@ void protocol_auto_cycle_start()
 // handles them, removing the need to define more computationally-expensive volatile variables. This
 // also provides a controlled way to execute certain tasks without having two or more instances of
 // the same task, such as the planner recalculating the buffer upon a feedhold or overrides.
+此功能是Grbl实时命令执行系统的常规接口，负责更新各个全局状态量。
+从主程序的各个检查点调用它，主要是在有while循环等待缓冲区清除空间的地方，
+或者执行时间可能超过一秒的任何检查点。
+
+此功能还充当中断的接口，以设置系统实时标志，只有主程序在其中处理它们。
+
 // NOTE: The sys_rt_exec_state variable flags are set by any process, step or serial interrupts, pinouts,
 // limit switches, or the main program.
+
 void protocol_execute_realtime()
 {
   protocol_exec_rt_system();
@@ -216,10 +228,12 @@ void protocol_execute_realtime()
 // Executes run-time commands, when required. This function primarily operates as Grbl's state
 // machine and controls the various real-time features Grbl has to offer.
 // NOTE: Do not alter this unless you know exactly what you are doing!
+// GRBL的状态机系统：负责实时状态更新
 void protocol_exec_rt_system()
 {
   uint8_t rt_exec; // Temp variable to avoid calling volatile multiple times.
   rt_exec = sys_rt_exec_alarm; // Copy volatile sys_rt_exec_alarm.
+  // 系统报警，所有动作停止。
   if (rt_exec) { // Enter only if any bit flag is true
     // System alarm. Everything has shutdown by something that has gone severely wrong. Report
     // the source of the error to the user. If critical, Grbl disables by entering an infinite
@@ -245,8 +259,10 @@ void protocol_exec_rt_system()
   if (rt_exec) {
 
     // Execute system abort.
+    // sys_rt_exec_state从什么位置被设置成EXEC_RESET？
     if (rt_exec & EXEC_RESET) {
       sys.abort = true;  // Only place this is set true.
+      // 但是这时的sys_rt_exec_alarm并没有被清除，在哪里清除？
       return; // Nothing else to do but exit.
     }
 
@@ -258,23 +274,25 @@ void protocol_exec_rt_system()
 
     // NOTE: Once hold is initiated, the system immediately enters a suspend state to block all
     // main program processes until either reset or resumed. This ensures a hold completes safely.
-    if (rt_exec & (EXEC_MOTION_CANCEL | EXEC_FEED_HOLD | EXEC_SAFETY_DOOR | EXEC_SLEEP)) {
+	// 收到指令要求运动关闭、动作保持、安全门、休眠时，系统应该暂停，更新sys.suspend
+	if (rt_exec & (EXEC_MOTION_CANCEL | EXEC_FEED_HOLD | EXEC_SAFETY_DOOR | EXEC_SLEEP)) {
 
       // State check for allowable states for hold methods.
       if (!(sys.state & (STATE_ALARM | STATE_CHECK_MODE))) {
       
-        // If in CYCLE or JOG states, immediately initiate a motion HOLD.
+        // If in CYCLE or JOG states, 马上暂停动作.
         if (sys.state & (STATE_CYCLE | STATE_JOG)) {
           if (!(sys.suspend & (SUSPEND_MOTION_CANCEL | SUSPEND_JOG_CANCEL))) { // Block, if already holding.
             st_update_plan_block_parameters(); // Notify stepper module to recompute for hold deceleration.
             sys.step_control = STEP_CONTROL_EXECUTE_HOLD; // Initiate suspend state with active flag.
-            if (sys.state == STATE_JOG) { // Jog cancelled upon any hold event, except for sleeping.
+            if (sys.state == STATE_JOG) { // 点动状态被取消，但是睡眠指令无法取消点动状态
               if (!(rt_exec & EXEC_SLEEP)) { sys.suspend |= SUSPEND_JOG_CANCEL; } 
             }
           }
         }
         // If IDLE, Grbl is not in motion. Simply indicate suspend state and hold is complete.
-        if (sys.state == STATE_IDLE) { sys.suspend = SUSPEND_HOLD_COMPLETE; }
+		// 空闲状态下被要求暂停，那就直接挂起系统。不需要其他处理所以挂起标志为complete
+		if (sys.state == STATE_IDLE) { sys.suspend = SUSPEND_HOLD_COMPLETE; }
 
         // Execute and flag a motion cancel with deceleration and return to idle. Used primarily by probing cycle
         // to halt and cancel the remainder of the motion.
@@ -287,19 +305,22 @@ void protocol_exec_rt_system()
 
         // Execute a feed hold with deceleration, if required. Then, suspend system.
         if (rt_exec & EXEC_FEED_HOLD) {
-          // Block SAFETY_DOOR, JOG, and SLEEP states from changing to HOLD state.
+          // 在SAFETY_DOOR, JOG,  SLEEP 状态下不处理 HOLD 指令.
           if (!(sys.state & (STATE_SAFETY_DOOR | STATE_JOG | STATE_SLEEP))) { sys.state = STATE_HOLD; }
         }
 
         // Execute a safety door stop with a feed hold and disable spindle/coolant.
         // NOTE: Safety door differs from feed holds by stopping everything no matter state, disables powered
         // devices (spindle/coolant), and blocks resuming until switch is re-engaged.
-        if (rt_exec & EXEC_SAFETY_DOOR) {
+		// 安全门指令：不管什么状态，都让全部设备停止
+		if (rt_exec & EXEC_SAFETY_DOOR) {
           report_feedback_message(MESSAGE_SAFETY_DOOR_AJAR);
           // If jogging, block safety door methods until jog cancel is complete. Just flag that it happened.
-          if (!(sys.suspend & SUSPEND_JOG_CANCEL)) {
+		  // JOG在前面已经处理，在这里跳过
+		  if (!(sys.suspend & SUSPEND_JOG_CANCEL)) {
             // Check if the safety re-opened during a restore parking motion only. Ignore if
             // already retracting, parked or in sleep state.
+            // 安全门状态下，又收到安全门指令
             if (sys.state == STATE_SAFETY_DOOR) {
               if (sys.suspend & SUSPEND_INITIATE_RESTORE) { // Actively restoring
                 #ifdef PARKING_ENABLE
@@ -314,7 +335,8 @@ void protocol_exec_rt_system()
                 sys.suspend |= SUSPEND_RESTART_RETRACT;
               }
             }
-            if (sys.state != STATE_SLEEP) { sys.state = STATE_SAFETY_DOOR; }
+			// SLEEP状态下，忽略安全门指令
+			if (sys.state != STATE_SLEEP) { sys.state = STATE_SAFETY_DOOR; }
           }
           // NOTE: This flag doesn't change when the door closes, unlike sys.state. Ensures any parking motions
           // are executed if the door switch closes and the state returns to HOLD.
@@ -327,34 +349,35 @@ void protocol_exec_rt_system()
         if (sys.state == STATE_ALARM) { sys.suspend |= (SUSPEND_RETRACT_COMPLETE|SUSPEND_HOLD_COMPLETE); }
         sys.state = STATE_SLEEP; 
       }
-
+	  // 清除sys_rt_exec_state
       system_clear_exec_state_flag((EXEC_MOTION_CANCEL | EXEC_FEED_HOLD | EXEC_SAFETY_DOOR | EXEC_SLEEP));
     }
-
+	// 启动自动循环
     // Execute a cycle start by starting the stepper interrupt to begin executing the blocks in queue.
     if (rt_exec & EXEC_CYCLE_START) {
-      // Block if called at same time as the hold commands: feed hold, motion cancel, and safety door.
-      // Ensures auto-cycle-start doesn't resume a hold without an explicit user-input.
+      // 自动循环不能同时出现: feed hold, motion cancel, and safety door.
       if (!(rt_exec & (EXEC_FEED_HOLD | EXEC_MOTION_CANCEL | EXEC_SAFETY_DOOR))) {
-        // Resume door state when parking motion has retracted and door has been closed.
-        if ((sys.state == STATE_SAFETY_DOOR) && !(sys.suspend & SUSPEND_SAFETY_DOOR_AJAR)) {
-          if (sys.suspend & SUSPEND_RESTORE_COMPLETE) {
+        // 想要自动循环，先确认安全门复位。
+        if ((sys.state == STATE_SAFETY_DOOR) && !(sys.suspend & SUSPEND_SAFETY_DOOR_AJAR)) { // 如果系统处于安全门状态下，检测到安全门挂起状态被撤销
+          if (sys.suspend & SUSPEND_RESTORE_COMPLETE) { // 如果恢复已经完成
             sys.state = STATE_IDLE; // Set to IDLE to immediately resume the cycle.
-          } else if (sys.suspend & SUSPEND_RETRACT_COMPLETE) {
+          } else if (sys.suspend & SUSPEND_RETRACT_COMPLETE) { // 如果挂起状态被撤销
             // Flag to re-energize powered components and restore original position, if disabled by SAFETY_DOOR.
             // NOTE: For a safety door to resume, the switch must be closed, as indicated by HOLD state, and
             // the retraction execution is complete, which implies the initial feed hold is not active. To
             // restore normal operation, the restore procedures must be initiated by the following flag. Once,
             // they are complete, it will call CYCLE_START automatically to resume and exit the suspend.
-            sys.suspend |= SUSPEND_INITIATE_RESTORE;
+            sys.suspend |= SUSPEND_INITIATE_RESTORE; // 启动恢复
           }
         }
         // Cycle start only when IDLE or when a hold is complete and ready to resume.
+        // 想要自动循环，确保系统处于空闲状态，或者HOLD已经被处理完成
         if ((sys.state == STATE_IDLE) || ((sys.state & STATE_HOLD) && (sys.suspend & SUSPEND_HOLD_COMPLETE))) {
           if (sys.state == STATE_HOLD && sys.spindle_stop_ovr) {
             sys.spindle_stop_ovr |= SPINDLE_STOP_OVR_RESTORE_CYCLE; // Set to restore in suspend routine and cycle start after.
           } else {
             // Start cycle only if queued motions exist in planner buffer and the motion is not canceled.
+            // 确保执行队列中有内容并且运动没有被关闭，则可以开始自动循环
             sys.step_control = STEP_CONTROL_NORMAL_OP; // Restore step control to normal operation
             if (plan_get_current_block() && bit_isfalse(sys.suspend,SUSPEND_MOTION_CANCEL)) {
               sys.suspend = SUSPEND_DISABLE; // Break suspend state.

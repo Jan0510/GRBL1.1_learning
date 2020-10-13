@@ -273,17 +273,20 @@ void spindle_stop()
 
 // G-code parser entry-point for setting spindle state. Forces a planner buffer sync and bails 
 // if an abort or check-mode is active.
+// 被GCode解释器调用，用于将主轴状态和速度同步到规划器，但是如果解释器处于错误检查阶段，则直接返回。
 #ifdef VARIABLE_SPINDLE
   void spindle_sync(uint8_t state, float rpm)
   {
-    if (sys.state == STATE_CHECK_MODE) { return; }
+    if (sys.state == STATE_CHECK_MODE) { return; } // 系统位于GCode错误检查阶段，不执行
+    // 设置主轴之前，先把执行队列的内容执行完。
     protocol_buffer_synchronize(); // Empty planner buffer to ensure spindle is set when programmed.
-    spindle_set_state(state,rpm);
+	// 设置主轴
+	spindle_set_state(state,rpm);
   }
 #else
   void _spindle_sync(uint8_t state)
   {
-    if (sys.state == STATE_CHECK_MODE) { return; }
+    if (sys.state == STATE_CHECK_MODE) { return; } // 系统位于GCode错误检查阶段，不执行
     protocol_buffer_synchronize(); // Empty planner buffer to ensure spindle is set when programmed.
     _spindle_set_state(state);
   }

@@ -224,11 +224,14 @@ static st_prep_t prep;
 void st_wake_up()
 {
   // Enable stepper drivers.
+  // 引脚反转
   if (bit_istrue(settings.flags,BITFLAG_INVERT_ST_ENABLE)) { STEPPERS_DISABLE_PORT |= (1<<STEPPERS_DISABLE_BIT); }
   else { STEPPERS_DISABLE_PORT &= ~(1<<STEPPERS_DISABLE_BIT); }
 
   // Initialize stepper output bits to ensure first ISR call does not step.
+  // 确保第一个ISR不要动作。因为第1个脉冲的频率没有被初始化，所以这个脉冲不能输出。
   st.step_outbits = step_port_invert_mask;
+  // 脉冲频率是在前一个脉冲结束后的ISR中设置下一个脉冲频率的。
 
   // Initialize step pulse timing from settings. Here to ensure updating after re-writing.
   #ifdef STEP_PULSE_DELAY
@@ -665,24 +668,26 @@ static uint8_t st_next_block_index(uint8_t block_index)
    Currently, the segment buffer conservatively holds roughly up to 40-50 msec of steps.
    NOTE: Computation units are in steps, millimeters, and minutes.
 */
+// 为步进运动准备数据段，把planer生成的block_buffer的数据取出，推入st_block_buff（segment buffer），将由stepper来处理
 void st_prep_buffer()
 {
   // Block step prep buffer, while in a suspend state and there is no suspend motion to execute.
-  if (bit_istrue(sys.step_control,STEP_CONTROL_END_MOTION)) { return; }
+  if (bit_istrue(sys.step_control,STEP_CONTROL_END_MOTION)) { return; } // 有接收到停止运动指令，同样停止生成数据
 
-  while (segment_buffer_tail != segment_next_head) { // Check if we need to fill the buffer.
+  while (segment_buffer_tail != segment_next_head) { // Check if st_block_buff is empty.
 
     // Determine if we need to load a new planner block or if the block needs to be recomputed.
     if (pl_block == NULL) {
 
-      // Query planner for a queued block
+      // 把planer生成的block_buffer的数据块取出，放入临时变量pl_block
       if (sys.step_control & STEP_CONTROL_EXECUTE_SYS_MOTION) { pl_block = plan_get_system_motion_block(); }
       else { pl_block = plan_get_current_block(); }
       if (pl_block == NULL) { return; } // No planner blocks. Exit.
 
-      // Check if we need to only recompute the velocity profile or load a new block.
-      if (prep.recalculate_flag & PREP_FLAG_RECALCULATE) {
-
+      // Check if we need to only recompute the velocity profile（速度曲线） or load a new block.
+      // prep作为辅助变量，在block_buffer转移到st_block_buff过程中起作用
+      if (prep.recalculate_flag & PREP_FLAG_RECALCULATE) { // 重新计算速度曲线
+      // 什么时候会需要重新计算呢？一般是调整了速度修调(Ratio)之后，会对未被执行的运动段重新进行计算
         #ifdef PARKING_ENABLE
           if (prep.recalculate_flag & PREP_FLAG_PARKING) { prep.recalculate_flag &= ~(PREP_FLAG_RECALCULATE); }
           else { prep.recalculate_flag = false; }
@@ -691,15 +696,18 @@ void st_prep_buffer()
         #endif
 
       } else {
-
+		// 不需要重新计算，准备推入st_block_buff，所以对st_block_index++
         // Load the Bresenham stepping data for the block.
+        
         prep.st_block_index = st_next_block_index(prep.st_block_index);
 
         // Prepare and copy Bresenham algorithm segment data from the new planner block, so that
         // when the segment buffer completes the planner block, it may be discarded when the
         // segment buffer finishes the prepped block, but the stepper ISR is still executing it.
+        // 把planer生成的block_buffer的数据取出，推入st_block_buff（也称segment buffer）
         st_prep_block = &st_block_buffer[prep.st_block_index];
         st_prep_block->direction_bits = pl_block->direction_bits;
+		// 一般都是非龙门架结构，所以默认禁用双轴模式
         #ifdef ENABLE_DUAL_AXIS
           #if (DUAL_AXIS_SELECT == X_AXIS)
             if (st_prep_block->direction_bits & (1<<X_DIRECTION_BIT)) { 
@@ -710,7 +718,9 @@ void st_prep_buffer()
           }  else { st_prep_block->direction_bits_dual = 0; }
         #endif
         uint8_t idx;
+		// 多轴平滑步进功能，Bresenham算法就是一种改进的DDA算法，最大的特点就是计算过程不带浮点数，全用整型数
         #ifndef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
+		  // 把各轴的的步数*2，脉冲输出阈值*2，然后在ISR中除以2
           for (idx=0; idx<N_AXIS; idx++) { st_prep_block->steps[idx] = (pl_block->steps[idx] << 1); }
           st_prep_block->step_event_count = (pl_block->step_event_count << 1);
         #else
@@ -722,13 +732,14 @@ void st_prep_buffer()
         #endif
 
         // Initialize segment buffer data for generating the segments.
-        prep.steps_remaining = (float)pl_block->step_event_count;
-        prep.step_per_mm = prep.steps_remaining/pl_block->millimeters;
+        // prep作为辅助变量，协助将block_buffer的数据推入st_block_buff
+        prep.steps_remaining = (float)pl_block->step_event_count; // 剩余步数
+        prep.step_per_mm = prep.steps_remaining/pl_block->millimeters; // 剩余步数除以剩余距离，等于每步距离
         prep.req_mm_increment = REQ_MM_INCREMENT_SCALAR/prep.step_per_mm;
         prep.dt_remainder = 0.0; // Reset for new segment block
 
         if ((sys.step_control & STEP_CONTROL_EXECUTE_HOLD) || (prep.recalculate_flag & PREP_FLAG_DECEL_OVERRIDE)) {
-          // New block loaded mid-hold. Override planner block entry speed to enforce deceleration.
+          // 如果检测到系统有进给保持(HOLD)状态指令，或者要求重新按照减速状态计算
           prep.current_speed = prep.exit_speed;
           pl_block->entry_speed_sqr = prep.exit_speed*prep.exit_speed;
           prep.recalculate_flag &= ~(PREP_FLAG_DECEL_OVERRIDE);
@@ -739,6 +750,7 @@ void st_prep_buffer()
         #ifdef VARIABLE_SPINDLE
           // Setup laser mode variables. PWM rate adjusted motions will always complete a motion with the
           // spindle off. 
+          // 设置激光模式变量。 PWM速率调整的运动将始终在主轴关闭的情况下完成运动。
           st_prep_block->is_pwm_rate_adjusted = false;
           if (settings.flags & BITFLAG_LASER_MODE) {
             if (pl_block->condition & PL_COND_FLAG_SPINDLE_CCW) { 
@@ -758,20 +770,21 @@ void st_prep_buffer()
 			*/
 			prep.mm_complete = 0.0; // Default velocity profile complete at 0.0mm from end of block.
 			float inv_2_accel = 0.5/pl_block->acceleration;
+			// 如果检测到系统有进给保持(HOLD)状态指令，则直接进入全减速状态(RAMP_DECEL)
 			if (sys.step_control & STEP_CONTROL_EXECUTE_HOLD) { // [Forced Deceleration to Zero Velocity]
 				// Compute velocity profile parameters for a feed hold in-progress. This profile overrides
 				// the planner block profile, enforcing a deceleration to zero speed.
-				prep.ramp_type = RAMP_DECEL;
-				// Compute decelerate distance relative to end of block.
+				prep.ramp_type = RAMP_DECEL; // 进入全减速状态(RAMP_DECEL)
 				float decel_dist = pl_block->millimeters - inv_2_accel*pl_block->entry_speed_sqr;
 				if (decel_dist < 0.0) {
-					// Deceleration through entire planner block. End of feed hold is not in this block.
 					prep.exit_speed = sqrt(pl_block->entry_speed_sqr-2*pl_block->acceleration*pl_block->millimeters);
 				} else {
+					
 					prep.mm_complete = decel_dist; // End of feed hold.
 					prep.exit_speed = 0.0;
 				}
-			} else { // [Normal Operation]
+			}
+			else { // [Normal Operation]
 				// Compute or recompute velocity profile parameters of the prepped planner block.
 				prep.ramp_type = RAMP_ACCEL; // Initialize as acceleration ramp.
 				prep.accelerate_until = pl_block->millimeters;

@@ -114,9 +114,10 @@ void delay_sec(float seconds, uint8_t mode)
  	uint16_t i = ceil(1000/DWELL_TIME_STEP*seconds);
 	while (i-- > 0) {
 		if (sys.abort) { return; }
-		if (mode == DELAY_MODE_DWELL) {
+		if (mode == DELAY_MODE_DWELL) { // G4停车
 			protocol_execute_realtime();
-		} else { // DELAY_MODE_SYS_SUSPEND
+		}
+		else { // DELAY_MODE_SYS_SUSPEND，系统挂起
 		  // Execute rt_system() only to avoid nesting suspend loops.
 		  protocol_exec_rt_system();
 		  if (sys.suspend & SUSPEND_RESTART_RETRACT) { return; } // Bail, if safety door reopens.
