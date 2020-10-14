@@ -55,11 +55,13 @@ void mc_line(float *target, plan_line_data_t *pl_data)
   do {
     protocol_execute_realtime(); // Check for any run-time commands
     if (sys.abort) { return; } // Bail, if system abort.
+    // 如果block_buffer还有内容，则开启auto cycle把buffer的内容都执行完，然后跳出while
     if ( plan_check_full_buffer() ) { protocol_auto_cycle_start(); } // Auto-cycle start when buffer is full.
     else { break; }
   } while (1);
 
   // Plan and queue motion into planner buffer
+  // 跳出while后block_buffer已空，把新的block推入block_buffer
   if (plan_buffer_line(target, pl_data) == PLAN_EMPTY_BLOCK) {
     if (bit_istrue(settings.flags,BITFLAG_LASER_MODE)) {
       // Correctly set spindle state, if there is a coincident position passed. Forces a buffer

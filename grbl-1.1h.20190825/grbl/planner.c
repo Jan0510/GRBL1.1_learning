@@ -50,6 +50,7 @@ uint8_t plan_next_block_index(uint8_t block_index)
 
 
 // Returns the index of the previous block in the ring buffer
+// 该缓冲区是FIFO形式，head入队，tail出队，该函数是从tail往head方向移动的。
 static uint8_t plan_prev_block_index(uint8_t block_index)
 {
   if (block_index == 0) { block_index = BLOCK_BUFFER_SIZE; }
@@ -59,23 +60,26 @@ static uint8_t plan_prev_block_index(uint8_t block_index)
 
 
 /*                            PLANNER SPEED DEFINITION
-                                     +--------+   <- current->nominal_speed
+                                     +--------+   <- current->nominal_speed（额定）
                                     /          \
          current->entry_speed ->   +            \
                                    |             + <- next->entry_speed (aka exit speed)
                                    +-------------+
                                        time -->
 
-  Recalculates the motion plan according to the following basic guidelines:
+  根据以下基本准则重新计算运动计划:
+  
 
-    1. Go over every feasible block sequentially in reverse order and calculate the junction speeds
+    1. 从后往前遍历block计算entry_speed（连接点速度不能过大）
+    Go over every feasible block sequentially in reverse order and calculate the junction speeds
         (i.e. current->entry_speed) such that:
       a. No junction speed exceeds the pre-computed maximum junction speed limit or nominal speeds of
          neighboring blocks.
       b. A block entry speed cannot exceed one reverse-computed from its exit speed (next->entry_speed)
          with a maximum allowable deceleration over the block travel distance.
       c. The last (or newest appended) block is planned from a complete stop (an exit speed of zero).
-    2. Go over every block in chronological (forward) order and dial down junction speed values if
+    2. 从前往后遍历block，检查exit_speed与entry_speed时候拟合。
+    Go over every block in chronological (forward) order and dial down junction speed values if
       a. The exit speed exceeds the one forward-computed from its entry speed with the maximum allowable
          acceleration over the block travel distance.
 
@@ -84,6 +88,9 @@ static uint8_t plan_prev_block_index(uint8_t block_index)
   other words, for all of the blocks in the planner, the plan is optimal and no further speed improvements
   are possible. If a new block is added to the buffer, the plan is recomputed according to the said
   guidelines for a new optimal plan.
+  当这些阶段完成后，规划器将在所有块中最大化速度曲线，其中每个块均以其最大允许加速度极限运行。 
+  换句话说，对于计划器中的所有块，计划都是最佳的，无法进一步提高速度。 
+  如果将新块添加到缓冲器，则根据用于新的最佳计划的所述准则重新计算计划。
 
   To increase computational efficiency of these guidelines, a set of planner block pointers have been
   created to indicate stop-compute points for when the planner guidelines cannot logically make any further
@@ -99,12 +106,16 @@ static uint8_t plan_prev_block_index(uint8_t block_index)
   recomputed as stated in the general guidelines.
 
   Planner buffer index mapping:
-  - block_buffer_tail: Points to the beginning of the planner buffer. First to be executed or being executed.
-  - block_buffer_head: Points to the buffer block after the last block in the buffer. Used to indicate whether
+  // block都是从head入队，从tail出队。FIFO先进先出。
+  - block_buffer_tail: 指示即将出队的位置。blockPoints to the beginning of the planner buffer. First to be executed or being executed.
+  - block_buffer_head: 指示即将入队的位置。Points to the buffer block after the last block in the buffer. Used to indicate whether
       the buffer is full or empty. As described for standard ring buffers, this block is always empty.
-  - next_buffer_head: Points to next planner buffer block after the buffer head block. When equal to the
+  - next_buffer_head: 相当于head++，如果next_buffer_head==block_buffer_tail，说明缓冲区满载。
+      事实上还剩一个空位是head指向的位置。但是，对于环形缓冲区来说，一般都让head指向的位置保持为空。
+      Points to next planner buffer block after the buffer head block. When equal to the
       buffer tail, this indicates the buffer is full.
-  - block_buffer_planned: Points to the first buffer block after the last optimally planned block for normal
+  - block_buffer_planned: 缓冲区中存在2部分，一部分是planed的，一部分是to be planed的，该指针指向to be planed的的第一个块。
+      Points to the first buffer block after the last optimally planned block for normal
       streaming operating conditions. Use for planning optimizations by avoiding recomputing parts of the
       planner buffer that don't change with the addition of a new block, as describe above. In addition,
       this block can never be less than block_buffer_tail and will always be pushed forward and maintain
@@ -121,31 +132,44 @@ static uint8_t plan_prev_block_index(uint8_t block_index)
   for the planner to compute over. It also increases the number of computations the planner has to perform
   to compute an optimal plan, so select carefully. The Arduino 328p memory is already maxed out, but future
   ARM versions should have enough memory and speed for look-ahead blocks numbering up to a hundred or more.
+  由于计划器仅根据计划器缓冲区中的内容进行计算，因此某些带有许多短线段的运动（例如G2 / 3弧或复杂曲线）似乎运动缓慢。
+  这是因为，按照指南所述，在整个缓冲区中根本没有足够的组合距离来加速至标称速度，然后在缓冲区末端减速至完全停止。
+  如果发生这种情况并成为烦人的事，有一些简单的解决方案：
+  （1）最大化机器加速度。计划者将能够在相同的组合距离内计算出更高的速度分布。 
+  （2）将每个块的直线运动距离最大化到所需的公差。计划者必须使用的距离越多，则走得越快。 
+  （3）最大化计划程序缓冲区的大小。这也将增加计划者计算的总距离。它还增加了计划者为计算最佳计划而必须执行的计算量，因此请谨慎选择。 
+  Arduino 328p的内存已经用完了，但是未来的ARM版本应该具有足够的内存和速度，以供多达100个或更多的超前块使用。
 
 */
+// 在环形block_buffer中存放了足够多的block，然后为这些block规划最佳速度，让这些块衔接更流畅
 static void planner_recalculate()
 {
   // Initialize block index to the last block in the planner buffer.
-  uint8_t block_index = plan_prev_block_index(block_buffer_head);
+  // 注意：因为head指向的内存总是空的，head指示了即将入队的块的位置。
+  uint8_t block_index = plan_prev_block_index(block_buffer_head); // 获取刚刚入队的block，即FIFO队列的最后一个block
 
-  // Bail. Can't do anything with one only one plan-able block.
+  // 缓冲区中存在2部分，一部分是planed的，一部分是to be planed的。如果最后一个block是planed的，则不必再重新规划。
   if (block_index == block_buffer_planned) { return; }
 
   // Reverse Pass: Coarsely maximize all possible deceleration curves back-planning from the last
   // block in buffer. Cease planning when the last optimal planned or tail pointer is reached.
   // NOTE: Forward pass will later refine and correct the reverse pass to create an optimal plan.
+  // 反向遍历：从缓冲区的最后一个块开始，粗略地最大化所有可能的减速曲线的后向规划。 
+  // 注意：正向遍历将在以后细化和纠正反向遍历的规划，以创建最佳计划。
   float entry_speed_sqr;
   plan_block_t *next;
   plan_block_t *current = &block_buffer[block_index];
 
-  // Calculate maximum entry speed for last block in buffer, where the exit speed is always zero.
+  // 计算缓冲区中最后一个块的最大进入速度，该块的退出速度始终为零。
   current->entry_speed_sqr = min( current->max_entry_speed_sqr, 2*current->acceleration*current->millimeters);
 
-  block_index = plan_prev_block_index(block_index);
+  block_index = plan_prev_block_index(block_index); // 什么情况下会返回block_buffer_tail？
+  // 缓冲区中存在2部分，一部分是planed的，一部分是to be planed的。如果最后一个block是planed的，则不必再重新规划。
   if (block_index == block_buffer_planned) { // Only two plannable blocks in buffer. Reverse pass complete.
     // Check if the first block is the tail. If so, notify stepper to update its current parameters.
-    if (block_index == block_buffer_tail) { st_update_plan_block_parameters(); }
-  } else { // Three or more plan-able blocks
+	if (block_index == block_buffer_tail) { st_update_plan_block_parameters(); }
+  }
+  else { // Three or more plan-able blocks
     while (block_index != block_buffer_planned) {
       next = current;
       current = &block_buffer[block_index];
@@ -256,9 +280,11 @@ uint8_t plan_check_full_buffer()
 
 // Computes and returns block nominal speed based on running condition and override values.
 // NOTE: All system motion commands, such as homing/parking, are not subject to overrides.
+// 计算和返回额定速度
+// 注意：所有系统运动命令（例如归位/停车）均不受覆盖。
 float plan_compute_profile_nominal_speed(plan_block_t *block)
 {
-  float nominal_speed = block->programmed_rate;
+  float nominal_speed = block->programmed_rate; 
   if (block->condition & PL_COND_FLAG_RAPID_MOTION) { nominal_speed *= (0.01*sys.r_override); }
   else {
     if (!(block->condition & PL_COND_FLAG_NO_FEED_OVERRIDE)) { nominal_speed *= (0.01*sys.f_override); }
@@ -271,6 +297,7 @@ float plan_compute_profile_nominal_speed(plan_block_t *block)
 
 // Computes and updates the max entry speed (sqr) of the block, based on the minimum of the junction's
 // previous and current nominal speeds and max junction speed.
+// 计算并更新块的最大入口速度
 static void plan_compute_profile_parameters(plan_block_t *block, float nominal_speed, float prev_nominal_speed)
 {
   // Compute the junction maximum entry based on the minimum of the junction speed and neighboring nominal speeds.
@@ -312,13 +339,14 @@ void plan_update_velocity_profile_parameters()
    head. It avoids changing the planner state and preserves the buffer to ensure subsequent gcode
    motions are still planned correctly, while the stepper module only points to the block buffer head
    to execute the special system motion. */
-// 向block_buffer添加新的线性运动block
+// 被mc_line调用，向block_buffer添加新的线性运动block
 uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
 {
   // Prepare and initialize new block. Copy relevant pl_data for block execution.
   plan_block_t *block = &block_buffer[block_buffer_head];
   memset(block,0,sizeof(plan_block_t)); // Zero all block values.
   block->condition = pl_data->condition;
+  // 如果主轴速度可变
   #ifdef VARIABLE_SPINDLE
     block->spindle_speed = pl_data->spindle_speed;
   #endif
@@ -332,7 +360,9 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
   uint8_t idx;
 
   // Copy position data based on type of motion being planned.
-  if (block->condition & PL_COND_FLAG_SYSTEM_MOTION) { 
+  // 基于运动类型，拷贝位置数据
+  // sys_position与pl.position的区别是什么？
+  if (block->condition & PL_COND_FLAG_SYSTEM_MOTION) { // 系统运动：home/park
     #ifdef COREXY
       position_steps[X_AXIS] = system_convert_corexy_to_x_axis_steps(sys_position);
       position_steps[Y_AXIS] = system_convert_corexy_to_y_axis_steps(sys_position);
@@ -340,7 +370,7 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
     #else
       memcpy(position_steps, sys_position, sizeof(sys_position)); 
     #endif
-  } else { memcpy(position_steps, pl.position, sizeof(pl.position)); } // sys_position与pl.position的区别是什么？
+  } else { memcpy(position_steps, pl.position, sizeof(pl.position)); } 
   #ifdef COREXY
     target_steps[A_MOTOR] = lround(target[A_MOTOR]*settings.steps_per_mm[A_MOTOR]);
     target_steps[B_MOTOR] = lround(target[B_MOTOR]*settings.steps_per_mm[B_MOTOR]);
@@ -367,10 +397,10 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
       }
     #else
 	
-      target_steps[idx] = lround(target[idx]*settings.steps_per_mm[idx]); // 从绝对坐标地址转换到steps
-      block->steps[idx] = labs(target_steps[idx]-position_steps[idx]);
-      block->step_event_count = max(block->step_event_count, block->steps[idx]); // 记录最长轴的步数
-      delta_mm = (target_steps[idx] - position_steps[idx])/settings.steps_per_mm[idx]; // 记录该轴上的位移
+      target_steps[idx] = lround(target[idx]*settings.steps_per_mm[idx]); // 从绝对坐标地址转换到绝对steps
+      block->steps[idx] = labs(target_steps[idx]-position_steps[idx]); // 计算运动到目标需要多少steps
+      block->step_event_count = max(block->step_event_count, block->steps[idx]); // 记录最长的需要步数steps
+      delta_mm = (target_steps[idx] - position_steps[idx])/settings.steps_per_mm[idx]; // block->steps[idx]换算成mm
 	  #endif
     unit_vec[idx] = delta_mm; // Store unit vector numerator
 
@@ -386,13 +416,14 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
   // NOTE: This calculation assumes all axes are orthogonal (Cartesian) and works with ABC-axes,
   // if they are also orthogonal/independent. Operates on the absolute value of the unit vector.
   // 计算该block存放的距离、加速度、转速r/m
-  block->millimeters = convert_delta_vector_to_unit_vector(unit_vec);
+  block->millimeters = convert_delta_vector_to_unit_vector(unit_vec); // millimeters=sqrt(x*x+y*y+z*z)
   block->acceleration = limit_value_by_axis_maximum(settings.acceleration, unit_vec);
   block->rapid_rate = limit_value_by_axis_maximum(settings.max_rate, unit_vec);
 
   // 存放进给速度，根据标志位区分转速r/m或线速mm/m
   if (block->condition & PL_COND_FLAG_RAPID_MOTION) { block->programmed_rate = block->rapid_rate; }
   else { 
+  	// 对于线速来说，还要区分G93和G94
     block->programmed_rate = pl_data->feed_rate;
     if (block->condition & PL_COND_FLAG_INVERSE_TIME) { block->programmed_rate *= block->millimeters; }
   }
@@ -403,7 +434,8 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
 
     // Initialize block entry speed as zero. Assume it will be starting from rest. Planner will correct this later.
     // If system motion, the system motion block always is assumed to start from rest and end at a complete stop.
-    block->entry_speed_sqr = 0.0;
+	// 对于系统运动来说，总是从0启动到最后停止
+	block->entry_speed_sqr = 0.0;
     block->max_junction_speed_sqr = 0.0; // Starting from rest. Enforce start from zero velocity.
 
   } else {
@@ -428,7 +460,7 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
     // changed dynamically during operation nor can the line move geometry. This must be kept in
     // memory in the event of a feedrate override changing the nominal speeds of blocks, which can
     // change the overall maximum entry speed conditions of all blocks.
-	// 通过向心加速度逼近计算交点处的最大允许入口速度。
+	// 通过向心加速度逼近计算交点处的最大允许入口速度block->max_junction_speed_sqr。
     float junction_unit_vec[N_AXIS];
     float junction_cos_theta = 0.0;
     for (idx=0; idx<N_AXIS; idx++) {
@@ -455,9 +487,10 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
   }
 
   // Block system motion from updating this data to ensure next g-code motion is computed correctly.
+  // 本次block的处理已经完成，下面为下一次的block块运动准备一些数据。
   if (!(block->condition & PL_COND_FLAG_SYSTEM_MOTION)) {
-    float nominal_speed = plan_compute_profile_nominal_speed(block);
-    plan_compute_profile_parameters(block, nominal_speed, pl.previous_nominal_speed);
+    float nominal_speed = plan_compute_profile_nominal_speed(block); // 额定速度
+    plan_compute_profile_parameters(block, nominal_speed, pl.previous_nominal_speed); // 
     pl.previous_nominal_speed = nominal_speed;
     
     // Update previous path unit_vector and planner position.
@@ -469,6 +502,7 @@ uint8_t plan_buffer_line(float *target, plan_line_data_t *pl_data)
     next_buffer_head = plan_next_block_index(block_buffer_head);
 
     // Finish up by recalculating the plan with the new block.
+    // 推入1个block就重新规划1次
     planner_recalculate();
   }
   return(PLAN_OK);
