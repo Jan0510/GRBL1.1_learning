@@ -340,7 +340,7 @@
 // enable pin will output 5V for maximum RPM with 256 intermediate levels and 0V when disabled.
 // NOTE: IMPORTANT for Arduino Unos! When enabled, the Z-limit pin D11 and spindle enable pin D12 switch!
 // The hardware PWM output on pin D11 is required for variable spindle output voltages.
-// 使用PWM平均电压来控制转速RPM。5V=最大转速，0V=0r/min
+// 使用PWM平均电压来控制转速RPM（若是激光模式则控制功率）。5V=最大转速，0V=0r/min
 #define VARIABLE_SPINDLE // Default enabled. Comment to disable.
 
 // Used by variable spindle output only. This forces the PWM output to a minimum duty cycle when enabled.

@@ -254,15 +254,13 @@ void protocol_exec_rt_system()
     }
     system_clear_exec_alarm(); // Clear alarm
   }
-
+  // 正常运转，检查命令
   rt_exec = sys_rt_exec_state; // Copy volatile sys_rt_exec_state.
   if (rt_exec) {
-
     // Execute system abort.
-    // sys_rt_exec_state从什么位置被设置成EXEC_RESET？
+    // sys_rt_exec_state从什么位置被设置成EXEC_RESET？motion_control的mc_reset()
     if (rt_exec & EXEC_RESET) {
       sys.abort = true;  // Only place this is set true.
-      // 但是这时的sys_rt_exec_alarm并没有被清除，在哪里清除？
       return; // Nothing else to do but exit.
     }
 
@@ -274,13 +272,13 @@ void protocol_exec_rt_system()
 
     // NOTE: Once hold is initiated, the system immediately enters a suspend state to block all
     // main program processes until either reset or resumed. This ensures a hold completes safely.
-	// 收到指令要求运动关闭、动作保持、安全门、休眠时，系统应该暂停，更新sys.suspend
+	// 收到指令要求运动关闭、运动暂停、安全门、休眠时，系统应该暂停，更新sys.suspend
 	if (rt_exec & (EXEC_MOTION_CANCEL | EXEC_FEED_HOLD | EXEC_SAFETY_DOOR | EXEC_SLEEP)) {
 
       // State check for allowable states for hold methods.
       if (!(sys.state & (STATE_ALARM | STATE_CHECK_MODE))) {
       
-        // If in CYCLE or JOG states, 马上暂停动作.
+        // CYCLE or JOG states下, 能够被马上暂停动作.
         if (sys.state & (STATE_CYCLE | STATE_JOG)) {
           if (!(sys.suspend & (SUSPEND_MOTION_CANCEL | SUSPEND_JOG_CANCEL))) { // Block, if already holding.
             st_update_plan_block_parameters(); // Notify stepper module to recompute for hold deceleration.
@@ -355,7 +353,7 @@ void protocol_exec_rt_system()
 	// 启动自动循环
     // Execute a cycle start by starting the stepper interrupt to begin executing the blocks in queue.
     if (rt_exec & EXEC_CYCLE_START) {
-      // 自动循环不能同时出现: feed hold, motion cancel, and safety door.
+      // 自动循环不能出现: feed hold, motion cancel, and safety door.
       if (!(rt_exec & (EXEC_FEED_HOLD | EXEC_MOTION_CANCEL | EXEC_SAFETY_DOOR))) {
         // 想要自动循环，先确认安全门复位。
         if ((sys.state == STATE_SAFETY_DOOR) && !(sys.suspend & SUSPEND_SAFETY_DOOR_AJAR)) { // 如果系统处于安全门状态下，检测到安全门挂起状态被撤销
@@ -377,12 +375,14 @@ void protocol_exec_rt_system()
             sys.spindle_stop_ovr |= SPINDLE_STOP_OVR_RESTORE_CYCLE; // Set to restore in suspend routine and cycle start after.
           } else {
             // Start cycle only if queued motions exist in planner buffer and the motion is not canceled.
-            // 确保执行队列中有内容并且运动没有被关闭，则可以开始自动循环
+            // 确保block_buffer中有内容，并且系统没有被关闭，则可以开始自动循环
             sys.step_control = STEP_CONTROL_NORMAL_OP; // Restore step control to normal operation
             if (plan_get_current_block() && bit_isfalse(sys.suspend,SUSPEND_MOTION_CANCEL)) {
               sys.suspend = SUSPEND_DISABLE; // Break suspend state.
               sys.state = STATE_CYCLE;
+			  // 把block分解成segment
               st_prep_buffer(); // Initialize step segment buffer before beginning cycle.
+              // 启动周期定时器
               st_wake_up();
             } else { // Otherwise, do nothing. Set and resume IDLE state.
               sys.suspend = SUSPEND_DISABLE; // Break suspend state.
@@ -429,7 +429,7 @@ void protocol_exec_rt_system()
     }
   }
 
-  // Execute overrides.
+  // 覆盖动作，Execute overrides.
   rt_exec = sys_rt_exec_motion_override; // Copy volatile sys_rt_exec_motion_override
   if (rt_exec) {
     system_clear_exec_motion_overrides(); // Clear all motion override flags.

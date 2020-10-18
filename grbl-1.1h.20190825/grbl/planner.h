@@ -40,10 +40,10 @@
 #define PL_COND_FLAG_RAPID_MOTION      bit(0)
 #define PL_COND_FLAG_SYSTEM_MOTION     bit(1) // Single motion. Circumvents planner state. Used by home/park.
 #define PL_COND_FLAG_NO_FEED_OVERRIDE  bit(2) // Motion does not honor feed override.
-#define PL_COND_FLAG_INVERSE_TIME      bit(3) // Interprets feed rate value as inverse time when set.
-#define PL_COND_FLAG_SPINDLE_CW        bit(4)
-#define PL_COND_FLAG_SPINDLE_CCW       bit(5)
-#define PL_COND_FLAG_COOLANT_FLOOD     bit(6)
+#define PL_COND_FLAG_INVERSE_TIME      bit(3) // 置1时，将进给速度值解释为反时限。
+#define PL_COND_FLAG_SPINDLE_CW        bit(4) // 顺时针
+#define PL_COND_FLAG_SPINDLE_CCW       bit(5) // 逆时针
+#define PL_COND_FLAG_COOLANT_FLOOD     bit(6) // 冷却液
 #define PL_COND_FLAG_COOLANT_MIST      bit(7)
 #define PL_COND_MOTION_MASK    (PL_COND_FLAG_RAPID_MOTION|PL_COND_FLAG_SYSTEM_MOTION|PL_COND_FLAG_NO_FEED_OVERRIDE)
 #define PL_COND_SPINDLE_MASK   (PL_COND_FLAG_SPINDLE_CW|PL_COND_FLAG_SPINDLE_CCW)

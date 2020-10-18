@@ -161,7 +161,7 @@ void delay_us(uint32_t us)
 // Simple hypotenuse computation function.
 float hypot_f(float x, float y) { return(sqrt(x*x + y*y)); }
 
-
+// 输入的XYZ坐标，将被改写成X/D，Y/D，Z/D，即轴向移动距离与两点直线距离之比
 float convert_delta_vector_to_unit_vector(float *vector)
 {
   uint8_t idx;

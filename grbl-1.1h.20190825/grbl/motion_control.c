@@ -67,31 +67,32 @@ void mc_line(float *target, plan_line_data_t *pl_data)
       // Correctly set spindle state, if there is a coincident position passed. Forces a buffer
       // sync while in M3 laser mode only.
       if (pl_data->condition & PL_COND_FLAG_SPINDLE_CW) {
-        spindle_sync(PL_COND_FLAG_SPINDLE_CW, pl_data->spindle_speed);
+        spindle_sync(PL_COND_FLAG_SPINDLE_CW, pl_data->spindle_speed); // 在plan_buffer_line()时将主轴参数状态更新过，sync输出
       }
     }
   }
 }
 
 
-// Execute an arc in offset mode format. position == current xyz, target == target xyz,
-// offset == offset from current xyz, axis_X defines circle plane in tool space, axis_linear is
-// the direction of helical travel, radius == circle radius, isclockwise boolean. Used
-// for vector transformation direction.
-// The arc is approximated by generating a huge number of tiny, linear segments. The chordal tolerance
-// of each segment is configured in settings.arc_tolerance, which is defined to be the maximum normal
-// distance from segment to the circle when the end points both lie on the circle.
+// 以偏移量格式执行圆弧插补
+// position == current xyz, target == target xyz,
+// offset == offset from current xyz, axis_X defines circle plane in tool space, 
+// axis_linear 螺旋运动的方向
+// radius == circle radius
+// isclockwise boolean. Used for vector transformation direction.
+// 通过生成大量微小的线性段来近似圆弧. 每个线段的弦公差都在settings.arc_tolerance中配置，该值定义为当端点都位于圆上时，线段到圆的最大法线距离。
 void mc_arc(float *target, plan_line_data_t *pl_data, float *position, float *offset, float radius,
   uint8_t axis_0, uint8_t axis_1, uint8_t axis_linear, uint8_t is_clockwise_arc)
 {
   float center_axis0 = position[axis_0] + offset[axis_0];
   float center_axis1 = position[axis_1] + offset[axis_1];
-  float r_axis0 = -offset[axis_0];  // Radius vector from center to current location
+  float r_axis0 = -offset[axis_0];  // current point到圆心的偏移量
   float r_axis1 = -offset[axis_1];
-  float rt_axis0 = target[axis_0] - center_axis0;
+  float rt_axis0 = target[axis_0] - center_axis0; // target point到圆心的偏移量
   float rt_axis1 = target[axis_1] - center_axis1;
 
   // CCW angle between position and target from circle center. Only one atan2() trig computation required.
+  // 当前和目标之间的扇形逆时针弧度。
   float angular_travel = atan2(r_axis0*rt_axis1-r_axis1*rt_axis0, r_axis0*rt_axis0+r_axis1*rt_axis1);
   if (is_clockwise_arc) { // Correct atan2 output per direction
     if (angular_travel >= -ARC_ANGULAR_TRAVEL_EPSILON) { angular_travel -= 2*M_PI; }
@@ -103,13 +104,17 @@ void mc_arc(float *target, plan_line_data_t *pl_data, float *position, float *of
   // (2x) settings.arc_tolerance. For 99% of users, this is just fine. If a different arc segment fit
   // is desired, i.e. least-squares, midpoint on arc, just change the mm_per_arc_segment calculation.
   // For the intended uses of Grbl, this value shouldn't exceed 2000 for the strictest of cases.
+  // 线段的端点在圆弧上，这可能导致圆弧直径减小多达（2x）settings.arc_tolerance。 
+  // 对于99％的用户，这很好。 如果需要不同的弧段拟合，即最小二乘，弧上的中点，只需更改mm_per_arc_segment计算即可,该值不应超过2000。。 
+  
+  // segments表示arc被拆分成多少段
   uint16_t segments = floor(fabs(0.5*angular_travel*radius)/
                           sqrt(settings.arc_tolerance*(2*radius - settings.arc_tolerance)) );
 
   if (segments) {
     // Multiply inverse feed_rate to compensate for the fact that this movement is approximated
     // by a number of discrete segments. The inverse feed_rate should be correct for the sum of
-    // all segments.
+    // 将逆时限（G94）转换为绝对进给模式（G93）
     if (pl_data->condition & PL_COND_FLAG_INVERSE_TIME) { 
       pl_data->feed_rate *= segments; 
       bit_false(pl_data->condition,PL_COND_FLAG_INVERSE_TIME); // Force as feed absolute mode over arc segments.
@@ -154,7 +159,7 @@ void mc_arc(float *target, plan_line_data_t *pl_data, float *position, float *of
     uint16_t i;
     uint8_t count = 0;
 
-    for (i = 1; i<segments; i++) { // Increment (segments-1).
+    for (i = 1; i<segments; i++) { // 循环(segments-1)次，最后一次在循环外面执行
 
       if (count < N_ARC_CORRECTION) {
         // Apply vector rotation matrix. ~40 usec

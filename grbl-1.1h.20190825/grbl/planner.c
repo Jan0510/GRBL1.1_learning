@@ -163,13 +163,14 @@ static void planner_recalculate()
   // 计算缓冲区中最后一个块的最大进入速度，该块的退出速度始终为零。
   current->entry_speed_sqr = min( current->max_entry_speed_sqr, 2*current->acceleration*current->millimeters);
 
-  block_index = plan_prev_block_index(block_index); // 什么情况下会返回block_buffer_tail？
-  // 缓冲区中存在2部分，一部分是planed的，一部分是to be planed的。如果最后一个block是planed的，则不必再重新规划。
+  block_index = plan_prev_block_index(block_index); // 
+  // 缓冲区中存在2部分，一部分是planed的，一部分是to be planed的。
+  // 检查前一个block是否planed
   if (block_index == block_buffer_planned) { // Only two plannable blocks in buffer. Reverse pass complete.
     // Check if the first block is the tail. If so, notify stepper to update its current parameters.
 	if (block_index == block_buffer_tail) { st_update_plan_block_parameters(); }
   }
-  else { // Three or more plan-able blocks
+  else { // 说明存在3个或3个以上的可以recalculate的block
     while (block_index != block_buffer_planned) {
       next = current;
       current = &block_buffer[block_index];
