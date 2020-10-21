@@ -93,7 +93,7 @@
 #define PROGRAM_FLOW_PAUSED 3 // M0
 #define PROGRAM_FLOW_OPTIONAL_STOP 1 // M1 NOTE: Not supported, but valid and ignored.
 #define PROGRAM_FLOW_COMPLETED_M2  2 // M2 (Do not alter value)
-#define PROGRAM_FLOW_COMPLETED_M30 30 // M30 (Do not alter value)
+#define PROGRAM_FLOW_COMPLETED_M30 30 // M30 (Do not alter value) 要交换托盘穿梭车，然后结束一个程序
 
 // Modal Group G5: Feed rate mode
 #define FEED_RATE_MODE_UNITS_PER_MIN  0 // G94 (Default: Must be zero)
