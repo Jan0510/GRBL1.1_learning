@@ -57,8 +57,8 @@
 #define NON_MODAL_NO_ACTION 0 // (Default: Must be zero)
 #define NON_MODAL_DWELL 4 // G4 (Do not alter value)
 #define NON_MODAL_SET_COORDINATE_DATA 10 // G10 (Do not alter value)
-#define NON_MODAL_GO_HOME_0 28 // G28 (Do not alter value)
-#define NON_MODAL_SET_HOME_0 38 // G28.1 (Do not alter value)
+#define NON_MODAL_GO_HOME_0 28 // G28 (Do not alter value) return to home
+#define NON_MODAL_SET_HOME_0 38 // G28.1 (Do not alter value) return to secondary home
 #define NON_MODAL_GO_HOME_1 30 // G30 (Do not alter value)
 #define NON_MODAL_SET_HOME_1 40 // G30.1 (Do not alter value)
 #define NON_MODAL_ABSOLUTE_OVERRIDE 53 // G53 (Do not alter value)
@@ -88,11 +88,11 @@
 // Modal Group G4: Arc IJK distance mode
 #define DISTANCE_ARC_MODE_INCREMENTAL 0 // G91.1 (Default: Must be zero)
 
-// Modal Group M4: Program flow
+// Modal Group M4: Program flow，stopping，发送编程指令暂停系统
 #define PROGRAM_FLOW_RUNNING 0 // (Default: Must be zero)
-#define PROGRAM_FLOW_PAUSED 3 // M0
+#define PROGRAM_FLOW_PAUSED 3 // M0 
 #define PROGRAM_FLOW_OPTIONAL_STOP 1 // M1 NOTE: Not supported, but valid and ignored.
-#define PROGRAM_FLOW_COMPLETED_M2  2 // M2 (Do not alter value)
+#define PROGRAM_FLOW_COMPLETED_M2  2 // M2 (Do not alter value) 
 #define PROGRAM_FLOW_COMPLETED_M30 30 // M30 (Do not alter value)
 
 // Modal Group G5: Feed rate mode

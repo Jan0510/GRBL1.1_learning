@@ -98,7 +98,7 @@ typedef struct {
   uint8_t stepper_idle_lock_time; // If max value 255, steppers do not disable.
   uint8_t status_report_mask; // Mask to indicate desired report data.
   float junction_deviation;
-  float arc_tolerance;
+  float arc_tolerance; //拟合线段到圆弧的最大法线距离
 
   float rpm_max;
   float rpm_min;
