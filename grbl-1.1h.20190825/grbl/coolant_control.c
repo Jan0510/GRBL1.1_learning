@@ -78,6 +78,7 @@ void coolant_stop()
 // if enabled. Also sets a flag to report an update to a coolant state.
 // Called by coolant toggle override, parking restore, parking retract, sleep mode, g-code
 // parser program end, and g-code parser coolant_sync().
+// 直接操作冷却液对应的port口
 void coolant_set_state(uint8_t mode)
 {
   if (sys.abort) { return; } // Block during abort.  

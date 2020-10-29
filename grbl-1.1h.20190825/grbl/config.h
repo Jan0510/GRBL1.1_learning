@@ -301,6 +301,9 @@
 // frequencies below 10kHz, where the aliasing between axes of multi-axis motions can cause audible
 // noise and shake your machine. At even lower step frequencies, AMASS adapts and provides even better
 // step smoothing. See stepper.c for more details on the AMASS system works.
+// 自适应多轴步进平滑（AMASS）是一项高级功能，它的功能如其名，可平滑多轴运动的步进。 
+// 此功能可平滑运动，尤其是在低于10kHz的低步进频率下，在多步运动的轴之间的混叠会引起听得见的噪音并震动机器。 
+// 在更低的步进频率下，AMASS可以适应并提供更好的步进平滑度。
 #define ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING  // Default enabled. Comment to disable.
 
 // Sets the maximum step rate allowed to be written as a Grbl setting. This option enables an error
@@ -332,10 +335,12 @@
 // tool length offset value is subtracted from the current location.
 #define TOOL_LENGTH_OFFSET_AXIS Z_AXIS // Default z-axis. Valid values are X_AXIS, Y_AXIS, or Z_AXIS.
 
+
 // Enables variable spindle output voltage for different RPM values. On the Arduino Uno, the spindle
 // enable pin will output 5V for maximum RPM with 256 intermediate levels and 0V when disabled.
 // NOTE: IMPORTANT for Arduino Unos! When enabled, the Z-limit pin D11 and spindle enable pin D12 switch!
 // The hardware PWM output on pin D11 is required for variable spindle output voltages.
+// 使用PWM平均电压来控制转速RPM（若是激光模式则控制功率）。5V=最大转速，0V=0r/min
 #define VARIABLE_SPINDLE // Default enabled. Comment to disable.
 
 // Used by variable spindle output only. This forces the PWM output to a minimum duty cycle when enabled.
@@ -638,9 +643,10 @@
 // run out of flash to fit on an Arduino 328p/Uno. Only X and Y axes are supported. Variable
 // spindle/laser mode IS supported, but only for one config option. Core XY, spindle direction
 // pin, and M7 mist coolant are disabled/not supported.
+// 默认禁用双轴功能：即有2条X轴，2个X电机，例如龙门架结构。
 // #define ENABLE_DUAL_AXIS	// Default disabled. Uncomment to enable.
-
 // Select the one axis to mirror another motor. Only X and Y axis is supported at this time.
+// 双轴功能的选择，选择X还是Y
 #define DUAL_AXIS_SELECT  X_AXIS  // Must be either X_AXIS or Y_AXIS
 
 // To prevent the homing cycle from racking the dual axis, when one limit triggers before the
